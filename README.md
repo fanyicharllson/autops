@@ -2,7 +2,6 @@
 
 > Working title: **Autonomous DevOps**. A network-level reverse-proxy gateway that predicts traffic spikes before they crash your backend, and proactively shapes traffic instead of waiting to react.
 
-Final-year Software Architecture thesis project — ICT University, defense early 2027.
 
 ## The problem
 
@@ -68,8 +67,8 @@ Two zones, kept strictly separate so the ML model never sits on the request's cr
 ## Getting started
 
 ```bash
-git clone https://github.com/<your-username>/<repo-name>.git
-cd <repo-name>
+git clone https://github.com/fanyicharllson/autops.git
+cd autops
 ```
 
 Prerequisites: Go 1.22+, Redis, Python 3.11+, Node.js 18+ (added incrementally as each milestone is built — not all needed on day one).
