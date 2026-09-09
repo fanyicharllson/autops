@@ -1,6 +1,7 @@
 package router
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -22,9 +23,19 @@ func New(backendURL string) (http.Handler, error) {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// TODO: extract real tenant ID from request (header / host / path).
 		tenant := "default"
-		mode := cache.GetMode(tenant)
+		mode, err := cache.GetMode(tenant)
 
-		if mode != "normal" {
+		// Fail open: never block or enter shaping on cache failure / bad values.
+		if err != nil || !recognizedMode(mode) {
+			slog.Warn("decision cache fallback to normal",
+				"tenant", tenant,
+				"mode", mode,
+				"err", err,
+			)
+			mode = "normal"
+		}
+
+		if mode == "shaping" {
 			// TODO: implement shaping / waiting-room path.
 			http.Error(w, "shaping mode not implemented", http.StatusServiceUnavailable)
 			return
@@ -32,4 +43,13 @@ func New(backendURL string) (http.Handler, error) {
 
 		proxy.ServeHTTP(w, r)
 	}), nil
+}
+
+func recognizedMode(mode string) bool {
+	switch mode {
+	case "normal", "shaping":
+		return true
+	default:
+		return false
+	}
 }
