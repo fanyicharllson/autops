@@ -1,20 +1,34 @@
-import http from "k6/http";
-import { check, sleep } from "k6";
+import http from 'k6/http';
+import { check, sleep } from 'k6';
 
-// Basic spike simulation against the AutOps proxy MVP.
+// Shaping-mode benchmark: confirms the gateway rejects fast (429) without
+// touching the backend, and measures gateway-only overhead while throttling.
+// Flip the tenant to shaping mode via POST /admin/mode before running this.
+
 export const options = {
-  stages: [
-    { duration: "10s", target: 10 }, // warm up
-    { duration: "30s", target: 200 }, // traffic spike
-    { duration: "20s", target: 200 }, // sustain
-    { duration: "10s", target: 0 }, // ramp down
-  ],
+  scenarios: {
+    steady_load: {
+      executor: 'constant-vus',
+      vus: 20,
+      duration: '30s',
+    },
+  },
+  thresholds: {
+    http_req_duration: ['p(95)<50'], // shaping should reject near-instantly
+    // no http_req_failed threshold here -- 429 is the expected, correct outcome
+  },
 };
 
+const BASE_URL = 'http://localhost:8080';
+
 export default function () {
-  const res = http.get("http://localhost:8080/");
-  check(res, {
-    "status is 2xx or upstream error (proxy up)": (r) => r.status > 0,
+  const res = http.get(`${BASE_URL}/`, {
+    headers: { Host: 'localhost' },
   });
+
+  check(res, {
+    'status is 429 (throttled as expected)': (r) => r.status === 429,
+  });
+
   sleep(0.1);
 }

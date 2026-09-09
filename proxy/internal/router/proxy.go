@@ -79,7 +79,7 @@ func New(tenants map[string]config.TenantConfig) (http.Handler, error) {
 		if mode == "shaping" {
 			// TODO: replace with virtual queue / waiting-room in a later milestone.
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusServiceUnavailable)
+			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte("Shaping mode active -- queueing not yet implemented"))
 			return
 		}
