@@ -1,0 +1,15 @@
+services:
+  proxy:
+    build: ../proxy
+    ports:
+      - "8080:8080"
+    environment:
+      BACKEND_URL: http://host.docker.internal:3000
+      LISTEN_ADDR: ":8080"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
