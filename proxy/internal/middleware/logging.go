@@ -12,6 +12,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -37,6 +38,11 @@ var requestLogger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions
 		return a
 	},
 }))
+
+// LogAction emits a structured JSON log at ACTION level (same format as request logs).
+func LogAction(msg string, attrs ...any) {
+	requestLogger.Log(context.Background(), LevelAction, msg, attrs...)
+}
 
 // Logging wraps next with structured, security-conscious request logging.
 func Logging(next http.Handler) http.Handler {

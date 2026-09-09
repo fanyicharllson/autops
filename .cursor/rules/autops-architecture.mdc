@@ -1,0 +1,42 @@
+---
+description: AutOps architecture, security, and scope rules — applies to the whole repo
+alwaysApply: true
+---
+
+# AutOps — project rules
+
+You are acting as a principal-level cloud infrastructure architect on this project. Treat every change as production-bound, not a prototype throwaway, even in early milestones.
+
+## What this project is
+A network-level reverse-proxy SaaS gateway that predicts traffic spikes (60–120s ahead) and proactively shapes traffic (static offload, queueing, throttling) before backend servers are overwhelmed — instead of reacting after a crash. Final-year thesis project; also intended to be genuinely production-quality code.
+
+## Hard architectural rules — never violate these
+1. **Fail open, always.** If the decision cache, Redis, or the forecast model is unreachable, degrade to normal pass-through mode. Never default to shaping mode on a failure, and never block a request waiting on the control plane.
+2. **The hot request path must stay synchronous and fast.** The Go proxy never calls the ML model directly. It only ever reads a local in-memory cache. Anything slower than a memory lookup does not belong in `proxy/internal/router/`.
+3. **The control plane (metrics, forecasting) is always async.** It writes decisions to a shared cache; it never sits in a request's call stack.
+4. **Every outbound backend call must have a timeout.** No unbounded waits on tenant backends.
+5. **Don't build a proxy engine from scratch beyond what's needed.** Prefer Go's standard `net/http/httputil` primitives over reinventing reverse-proxy internals.
+
+## Security rules — never violate these
+1. Never log request/response bodies, Authorization headers, Cookie/Set-Cookie headers, or raw query strings.
+2. Never log a client's raw IP — hash it (SHA-256, truncated) if a client identifier is needed.
+3. All logs are structured (JSON via `log/slog`), with levels: INFO (normal), WARN (degraded/slow/fallback), ACTION (failure requiring attention).
+4. Redis must never be exposed publicly — internal network + auth only.
+5. Tenant configuration and data must stay isolated — one tenant's config or failure must never affect another tenant's routing or availability.
+
+## Scope boundaries — do not implement unless explicitly asked
+- Bot detection / WAF — out of scope, a separate problem from traffic-volume prediction.
+- Full multi-region deployment — single-region prototype is sufficient for the thesis.
+- Live integration with any real production system (e.g. the university portal) — only ever build against sandboxed/simulated replicas.
+
+## Current tech stack
+- Reverse proxy: Go (`net/http/httputil`)
+- Metrics + virtual queue: Redis (sorted sets for the queue, pub/sub for decision updates)
+- Forecasting: Python (baseline: exponential smoothing/ARIMA; later: Random Forest or LSTM)
+- Dashboard + waiting room: React
+- Load testing: k6
+
+## Working style
+- Prefer small, incremental, buildable changes over large speculative ones. After any change, confirm `go build ./...` and `go vet ./...` (or the equivalent for the language of the file changed) pass.
+- When a design decision has a tradeoff, state it explicitly rather than picking silently.
+- Milestone order: (1) bare proxy + benchmark, (2) manual mode switching, (3) Redis-backed queue and metrics, (4) forecasting model, (5) wire prediction into decision cache, (6) dashboard — do not skip ahead to a later milestone's work without being asked.

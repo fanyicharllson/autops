@@ -1,34 +1,75 @@
 package router
 
 import (
+	"context"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
+	"time"
 
 	"github.com/fanyicharllson/autops/proxy/internal/cache"
+	"github.com/fanyicharllson/autops/proxy/internal/config"
+	"github.com/fanyicharllson/autops/proxy/internal/middleware"
 )
 
-// New creates a reverse-proxy handler that checks the tenant mode
-// via cache.GetMode before forwarding to the backend.
-// TODO: when mode is "shaping", route into the virtual queue instead of proxying.
-func New(backendURL string) (http.Handler, error) {
-	target, err := url.Parse(backendURL)
-	if err != nil {
-		return nil, err
+const backendTimeout = 10 * time.Second
+
+type tenantHandler struct {
+	cfg   config.TenantConfig
+	proxy *httputil.ReverseProxy
+}
+
+// New builds a host-based multi-tenant reverse proxy.
+// Tenants are looked up by the incoming Host header (port stripped).
+func New(tenants map[string]config.TenantConfig) (http.Handler, error) {
+	if len(tenants) == 0 {
+		return nil, errors.New("no tenants configured")
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	byHost := make(map[string]tenantHandler, len(tenants))
+	for domain, tc := range tenants {
+		target, err := url.Parse(tc.BackendURL)
+		if err != nil {
+			return nil, err
+		}
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		tenantDomain := tc.Domain
+		backendURL := tc.BackendURL
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			middleware.LogAction("backend unreachable",
+				"message", "backend unreachable",
+				"tenant", tenantDomain,
+				"backend_url", backendURL,
+				"error", err.Error(),
+			)
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("backend unreachable"))
+		}
+		byHost[strings.ToLower(domain)] = tenantHandler{
+			cfg:   tc,
+			proxy: proxy,
+		}
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: extract real tenant ID from request (header / host / path).
-		tenant := "default"
-		mode, err := cache.GetMode(tenant)
+		host := requestHost(r.Host)
+		th, ok := byHost[host]
+		if !ok {
+			http.Error(w, "tenant not found", http.StatusNotFound)
+			return
+		}
+
+		mode, err := cache.GetMode(th.cfg.Domain)
 
 		// Fail open: never block or enter shaping on cache failure / bad values.
 		if err != nil || !recognizedMode(mode) {
 			slog.Warn("decision cache fallback to normal",
-				"tenant", tenant,
+				"tenant", th.cfg.Domain,
 				"mode", mode,
 				"err", err,
 			)
@@ -36,13 +77,25 @@ func New(backendURL string) (http.Handler, error) {
 		}
 
 		if mode == "shaping" {
-			// TODO: implement shaping / waiting-room path.
-			http.Error(w, "shaping mode not implemented", http.StatusServiceUnavailable)
+			// TODO: replace with virtual queue / waiting-room in a later milestone.
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("Shaping mode active -- queueing not yet implemented"))
 			return
 		}
 
-		proxy.ServeHTTP(w, r)
+		ctx, cancel := context.WithTimeout(r.Context(), backendTimeout)
+		defer cancel()
+		th.proxy.ServeHTTP(w, r.WithContext(ctx))
 	}), nil
+}
+
+func requestHost(hostport string) string {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	return strings.ToLower(host)
 }
 
 func recognizedMode(mode string) bool {
