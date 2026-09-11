@@ -6,6 +6,7 @@ services:
     environment:
       BACKEND_URL: http://host.docker.internal:3000
       LISTEN_ADDR: ":8080"
+      REDIS_ADDR: redis:6379
     depends_on:
       - redis
 

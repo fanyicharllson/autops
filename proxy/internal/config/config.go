@@ -15,6 +15,7 @@ type TenantConfig struct {
 // Config holds runtime settings for the reverse proxy.
 type Config struct {
 	ListenAddr string
+	RedisAddr  string
 	// Tenants is keyed by Domain (hostname without port).
 	// TODO: replace this in-memory map with a real tenant registry.
 	Tenants map[string]TenantConfig
@@ -27,6 +28,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		ListenAddr: getEnv("LISTEN_ADDR", ":8080"),
+		RedisAddr:  getEnv("REDIS_ADDR", "localhost:6379"),
 		Tenants:    make(map[string]TenantConfig),
 	}
 

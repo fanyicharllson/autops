@@ -1,27 +1,41 @@
 package cache
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"sync"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
-// Temporary in-memory decision cache. This will be replaced by a Redis-backed
-// cache in the next milestone (updated by the control-plane forecaster).
-// Callers must fail open: on error or unrecognized mode, treat as "normal".
-var (
-	mu    sync.RWMutex
-	modes = make(map[string]string)
-)
+const redisTimeout = 100 * time.Millisecond
+
+var client *redis.Client
+
+// SetClient configures the Redis client used for mode storage. It is called
+// once during application startup.
+func SetClient(redisClient *redis.Client) {
+	client = redisClient
+}
 
 // GetMode returns the current traffic-shaping mode for a tenant.
 // Tenants with no entry default to "normal".
 func GetMode(tenant string) (string, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	if mode, ok := modes[tenant]; ok {
-		return mode, nil
+	if client == nil {
+		return "", errors.New("redis client is not configured")
 	}
-	return "normal", nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+	mode, err := client.Get(ctx, modeKey(tenant)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "normal", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get mode from redis: %w", err)
+	}
+	return mode, nil
 }
 
 // SetMode updates the traffic-shaping mode for a tenant.
@@ -36,8 +50,18 @@ func SetMode(tenant, mode string) error {
 		return fmt.Errorf("invalid mode %q: must be \"normal\" or \"shaping\"", mode)
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	modes[tenant] = mode
+	if client == nil {
+		return errors.New("redis client is not configured")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+	if err := client.Set(ctx, modeKey(tenant), mode, 0).Err(); err != nil {
+		return fmt.Errorf("set mode in redis: %w", err)
+	}
 	return nil
+}
+
+func modeKey(tenant string) string {
+	return "autops:mode:" + tenant
 }

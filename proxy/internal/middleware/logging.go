@@ -19,7 +19,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/fanyicharllson/autops/proxy/internal/metrics"
 )
 
 // LevelAction is a custom slog level for conditions that need operator attention.
@@ -51,6 +54,7 @@ func Logging(next http.Handler) http.Handler {
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 
 		next.ServeHTTP(sw, r)
+		go metrics.RecordRequest(requestHost(r.Host))
 
 		latencyMs := time.Since(start).Milliseconds()
 		path := r.URL.Path // query string intentionally omitted
@@ -73,6 +77,14 @@ func Logging(next http.Handler) http.Handler {
 			requestLogger.LogAttrs(r.Context(), slog.LevelInfo, "request", attrs...)
 		}
 	})
+}
+
+func requestHost(hostport string) string {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	return strings.ToLower(host)
 }
 
 func actionMessage(status int, latencyMs int64) string {
