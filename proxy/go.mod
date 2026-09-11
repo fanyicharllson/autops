@@ -1,6 +1,6 @@
 module github.com/fanyicharllson/autops/proxy
 
-go 1.24
+go 1.25.6
 
 require github.com/redis/go-redis/v9 v9.7.0
 
