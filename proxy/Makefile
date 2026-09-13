@@ -9,6 +9,7 @@ build:
 test:
 	go test ./...
 
-# TODO: wire up a real k6 load test once scripts/loadtest is finalized.
+# Runs baseline (normal) + shaping k6 suites with automatic /admin/mode flips.
+# Requires: proxy on :8080, Redis, ADMIN_TOKEN in the environment.
 bench:
-	k6 run ../scripts/loadtest/spike.js
+	@bash ../scripts/loadtest/run-bench.sh

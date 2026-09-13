@@ -3,7 +3,7 @@ import { check, sleep } from 'k6';
 
 // Shaping-mode benchmark: confirms the gateway rejects fast (429) without
 // touching the backend, and measures gateway-only overhead while throttling.
-// Flip the tenant to shaping mode via POST /admin/mode before running this.
+// Prefer `make bench` which flips mode via /admin/mode automatically.
 
 export const options = {
   scenarios: {

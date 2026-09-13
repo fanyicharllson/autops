@@ -44,3 +44,4 @@ Thumbs.db
 coverage/
 *.cover
 .k6/
+bench-results/
