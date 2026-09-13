@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,16 @@ func main() {
 	}()
 	cache.SetClient(redisClient)
 	metrics.SetClient(redisClient)
+
+	tenants := make([]string, 0, len(cfg.Tenants))
+	for domain := range cfg.Tenants {
+		tenants = append(tenants, domain)
+	}
+	cache.SeedTenants(tenants)
+
+	refreshCtx, cancelRefresh := context.WithCancel(context.Background())
+	defer cancelRefresh()
+	go cache.StartRefreshLoop(refreshCtx)
 
 	proxyHandler, err := router.New(cfg.Tenants)
 	if err != nil {
