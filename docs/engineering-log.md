@@ -60,3 +60,14 @@ This file grows over time. New entries go at the top (most recent first). Cursor
 
 cd proxy
 ADMIN_TOKEN=test123 make bench
+
+Good questions, let's clear each one up.
+
+Do you need multiple terminals?
+
+Yes, still — make bench only automates the testing part (flip mode, run k6, summarize), it doesn't start your actual services. You still need, running in the background, separately:
+
+Redis — already running via Docker Desktop, no terminal needed for this one since it runs detached
+The fake backend — needs its own terminal, still running (go run main.go in fake-backend/)
+The proxy itself — needs its own terminal, still running (go run ./cmd/proxy)
+Then, in a fourth terminal, you run make bench — this one actually finishes and exits, it's not a long-running process like the other three
