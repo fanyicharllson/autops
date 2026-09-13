@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"github.com/fanyicharllson/autops/proxy/internal/cache"
 	"github.com/fanyicharllson/autops/proxy/internal/config"
 	"github.com/fanyicharllson/autops/proxy/internal/middleware"
+	"github.com/fanyicharllson/autops/proxy/internal/queue"
 )
 
 const backendTimeout = 10 * time.Second
@@ -77,17 +79,70 @@ func New(tenants map[string]config.TenantConfig) (http.Handler, error) {
 		}
 
 		if mode == "shaping" {
-			// TODO: replace with virtual queue / waiting-room in a later milestone.
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte("Shaping mode active -- queueing not yet implemented"))
-			return
+			if !handleShaping(w, r, th) {
+				return
+			}
+			// Redeemed ticket — fall through to backend proxy.
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), backendTimeout)
 		defer cancel()
 		th.proxy.ServeHTTP(w, r.WithContext(ctx))
 	}), nil
+}
+
+// handleShaping processes shaping-mode queue logic.
+// Returns true if the request should be proxied to the backend.
+func handleShaping(w http.ResponseWriter, r *http.Request, th tenantHandler) bool {
+	tenant := th.cfg.Domain
+	queueID := r.URL.Query().Get("queue_id")
+
+	if queueID != "" {
+		ok, err := queue.Redeem(tenant, queueID)
+		if err != nil {
+			slog.Warn("queue redeem failed; failing open to backend",
+				"tenant", tenant,
+				"err", err,
+			)
+			stripQueueID(r)
+			return true
+		}
+		if ok {
+			stripQueueID(r)
+			return true
+		}
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error":    "not yet released",
+			"queue_id": queueID,
+		})
+		return false
+	}
+
+	id, err := queue.Enqueue(tenant)
+	if err != nil {
+		slog.Warn("queue enqueue failed; failing open to backend",
+			"tenant", tenant,
+			"err", err,
+		)
+		return true
+	}
+	writeJSON(w, http.StatusTooManyRequests, map[string]string{
+		"queue_id": id,
+		"message":  "queued, poll /queue/status to check your turn",
+	})
+	return false
+}
+
+func stripQueueID(r *http.Request) {
+	q := r.URL.Query()
+	q.Del("queue_id")
+	r.URL.RawQuery = q.Encode()
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func requestHost(hostport string) string {

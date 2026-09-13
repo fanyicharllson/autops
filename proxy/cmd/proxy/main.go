@@ -11,6 +11,7 @@ import (
 	"github.com/fanyicharllson/autops/proxy/internal/config"
 	"github.com/fanyicharllson/autops/proxy/internal/metrics"
 	"github.com/fanyicharllson/autops/proxy/internal/middleware"
+	"github.com/fanyicharllson/autops/proxy/internal/queue"
 	"github.com/fanyicharllson/autops/proxy/internal/router"
 	"github.com/redis/go-redis/v9"
 )
@@ -28,16 +29,19 @@ func main() {
 	}()
 	cache.SetClient(redisClient)
 	metrics.SetClient(redisClient)
+	queue.SetClient(redisClient)
 
 	tenants := make([]string, 0, len(cfg.Tenants))
 	for domain := range cfg.Tenants {
 		tenants = append(tenants, domain)
 	}
 	cache.SeedTenants(tenants)
+	queue.ConfigureRelease(tenants, cfg.ReleaseIntervalSeconds, cfg.ReleaseBatchSize)
 
-	refreshCtx, cancelRefresh := context.WithCancel(context.Background())
-	defer cancelRefresh()
-	go cache.StartRefreshLoop(refreshCtx)
+	bgCtx, cancelBG := context.WithCancel(context.Background())
+	defer cancelBG()
+	go cache.StartRefreshLoop(bgCtx)
+	go queue.StartReleaseLoop(bgCtx)
 
 	proxyHandler, err := router.New(cfg.Tenants)
 	if err != nil {
@@ -46,6 +50,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/admin/", admin.NewHandler(os.Getenv("ADMIN_TOKEN")))
+	mux.Handle("/queue/", queue.NewHandler())
 	mux.Handle("/", proxyHandler)
 
 	addr := cfg.ListenAddr

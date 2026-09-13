@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // TenantConfig describes a single host-based tenant backend.
@@ -16,6 +17,10 @@ type TenantConfig struct {
 type Config struct {
 	ListenAddr string
 	RedisAddr  string
+	// ReleaseIntervalSeconds controls how often the queue release loop runs.
+	ReleaseIntervalSeconds int
+	// ReleaseBatchSize is how many oldest tickets are released per tenant per cycle.
+	ReleaseBatchSize int
 	// Tenants is keyed by Domain (hostname without port).
 	// TODO: replace this in-memory map with a real tenant registry.
 	Tenants map[string]TenantConfig
@@ -27,9 +32,11 @@ type Config struct {
 // default is used (BACKEND_URL / TENANT_DOMAIN).
 func Load() (Config, error) {
 	cfg := Config{
-		ListenAddr: getEnv("LISTEN_ADDR", ":8080"),
-		RedisAddr:  getEnv("REDIS_ADDR", "localhost:6379"),
-		Tenants:    make(map[string]TenantConfig),
+		ListenAddr:             getEnv("LISTEN_ADDR", ":8080"),
+		RedisAddr:              getEnv("REDIS_ADDR", "localhost:6379"),
+		ReleaseIntervalSeconds: getEnvInt("RELEASE_INTERVAL_SECONDS", 5),
+		ReleaseBatchSize:       getEnvInt("RELEASE_BATCH_SIZE", 5),
+		Tenants:                make(map[string]TenantConfig),
 	}
 
 	if path := os.Getenv("TENANT_CONFIG_JSON"); path != "" {
@@ -80,4 +87,16 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
